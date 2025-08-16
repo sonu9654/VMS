@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Vehicle, User, NotificationData } from './types';
-import { getExpiringDocuments } from './utils';
+import api from './api';
 import { Login } from './components/Login';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
@@ -12,83 +12,89 @@ import { Settings } from './components/Settings';
 import { NotificationModal } from './components/NotificationModal';
 
 const STORAGE_KEYS = {
-  VEHICLES: 'vm_vehicles',
   USER: 'vm_user',
-  DISMISSED_NOTIFICATIONS: 'vm_dismissed_notifications'
 };
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [activeView, setActiveView] = useState('dashboard');
   const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
-  const [showNotificationModal, setShowNotificationModal] = useState(false);
-  const [dismissedNotifications, setDismissedNotifications] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
 
-  // Load data from localStorage on mount
+  // Check for user in localStorage on initial load
   useEffect(() => {
     const savedUser = localStorage.getItem(STORAGE_KEYS.USER);
-    const savedVehicles = localStorage.getItem(STORAGE_KEYS.VEHICLES);
-    const savedDismissed = localStorage.getItem(STORAGE_KEYS.DISMISSED_NOTIFICATIONS);
-    const savedTheme = localStorage.getItem('vm_theme') as 'light' | 'dark' || 'light';
-
     if (savedUser) {
       setUser(JSON.parse(savedUser));
     }
-    if (savedVehicles) {
-      setVehicles(JSON.parse(savedVehicles));
-    }
-    if (savedDismissed) {
-      setDismissedNotifications(JSON.parse(savedDismissed));
-    }
+    setIsLoading(false);
+    const savedTheme = localStorage.getItem('vm_theme') as 'light' | 'dark' || 'light';
     setTheme(savedTheme);
   }, []);
 
-  // Save vehicles to localStorage
+  // Fetch data when user is logged in
   useEffect(() => {
-    if (vehicles.length > 0) {
-      localStorage.setItem(STORAGE_KEYS.VEHICLES, JSON.stringify(vehicles));
+    if (user) {
+      fetchData();
     }
-  }, [vehicles]);
+  }, [user]);
 
-  // Check for expiring documents and show notifications
-  useEffect(() => {
-    if (vehicles.length > 0 && user) {
-      const expiringDocs = getExpiringDocuments(vehicles);
-      const newNotifications = expiringDocs.filter(doc => {
-        const notificationId = `${doc.vehicleNumber}-${doc.documentType}-${doc.expiryDate}`;
-        return !dismissedNotifications.includes(notificationId);
-      });
-
-      if (newNotifications.length > 0) {
-        setShowNotificationModal(true);
+  const fetchData = async () => {
+    setIsLoading(true);
+    try {
+      const [vehiclesRes, notificationsRes] = await Promise.all([
+        api.get('/vehicles'),
+        api.get('/notifications'),
+      ]);
+      setVehicles(vehiclesRes.data);
+      setNotifications(notificationsRes.data);
+    } catch (error) {
+      console.error('Failed to fetch data', error);
+      // If token is invalid, logout user
+      if ((error as any).response?.status === 401) {
+        handleLogout();
       }
+    } finally {
+      setIsLoading(false);
     }
-  }, [vehicles, user, dismissedNotifications]);
+  };
 
-  const handleLogin = (userData: User) => {
-    setUser(userData);
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(userData));
+  const handleLogin = async (email, password) => {
+    try {
+      const { data } = await api.post('/auth/login', { email, password });
+      setUser(data);
+      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(data));
+      return true;
+    } catch (error) {
+      console.error('Login failed', error);
+      return false;
+    }
   };
 
   const handleLogout = () => {
     setUser(null);
     setVehicles([]);
-    setDismissedNotifications([]);
+    setNotifications([]);
     localStorage.removeItem(STORAGE_KEYS.USER);
-    localStorage.removeItem(STORAGE_KEYS.VEHICLES);
-    localStorage.removeItem(STORAGE_KEYS.DISMISSED_NOTIFICATIONS);
+    setActiveView('dashboard');
   };
 
-  const handleSaveVehicle = (vehicle: Vehicle) => {
-    if (editingVehicle) {
-      setVehicles(prev => prev.map(v => v.id === vehicle.id ? vehicle : v));
-    } else {
-      setVehicles(prev => [...prev, vehicle]);
+  const handleSaveVehicle = async (vehicleData) => {
+    try {
+      if (editingVehicle) {
+        await api.put(`/vehicles/${editingVehicle.id}`, vehicleData);
+      } else {
+        await api.post('/vehicles', vehicleData);
+      }
+      fetchData(); // Refetch all data to get the latest state
+      setEditingVehicle(null);
+      setActiveView('dashboard');
+    } catch (error) {
+      console.error('Failed to save vehicle', error);
     }
-    setEditingVehicle(null);
-    setActiveView('dashboard');
   };
 
   const handleEditVehicle = (vehicle: Vehicle) => {
@@ -96,9 +102,23 @@ function App() {
     setActiveView('add-vehicle');
   };
 
-  const handleDeleteVehicle = (id: string) => {
+  const handleDeleteVehicle = async (id: string) => {
     if (confirm('Are you sure you want to delete this vehicle?')) {
-      setVehicles(prev => prev.filter(v => v.id !== id));
+      try {
+        await api.delete(`/vehicles/${id}`);
+        fetchData(); // Refetch
+      } catch (error) {
+        console.error('Failed to delete vehicle', error);
+      }
+    }
+  };
+
+  const handleMarkNotificationAsRead = async (id: string) => {
+    try {
+      await api.put(`/notifications/${id}/read`);
+      fetchData(); // Refetch
+    } catch (error) {
+      console.error('Failed to mark notification as read', error);
     }
   };
 
@@ -109,116 +129,74 @@ function App() {
     }
   };
 
-  const handleRemindTomorrow = (notification: NotificationData) => {
-    const notificationId = `${notification.vehicleNumber}-${notification.documentType}-${notification.expiryDate}`;
-    const newDismissed = [...dismissedNotifications, notificationId];
-    setDismissedNotifications(newDismissed);
-    localStorage.setItem(STORAGE_KEYS.DISMISSED_NOTIFICATIONS, JSON.stringify(newDismissed));
-    
-    // Set a reminder for tomorrow (in a real app, you'd use a proper notification system)
-    setTimeout(() => {
-      setDismissedNotifications(prev => prev.filter(id => id !== notificationId));
-      localStorage.setItem(STORAGE_KEYS.DISMISSED_NOTIFICATIONS, 
-        JSON.stringify(dismissedNotifications.filter(id => id !== notificationId))
-      );
-    }, 24 * 60 * 60 * 1000); // 24 hours
-  };
-
-  const handleRenewalDone = (notification: NotificationData) => {
-    const notificationId = `${notification.vehicleNumber}-${notification.documentType}-${notification.expiryDate}`;
-    const newDismissed = [...dismissedNotifications, notificationId];
-    setDismissedNotifications(newDismissed);
-    localStorage.setItem(STORAGE_KEYS.DISMISSED_NOTIFICATIONS, JSON.stringify(newDismissed));
-  };
-
   const handleThemeChange = (newTheme: 'light' | 'dark') => {
     setTheme(newTheme);
     localStorage.setItem('vm_theme', newTheme);
   };
 
-  const getNotificationCount = () => {
-    if (vehicles.length === 0) return 0;
-    const expiringDocs = getExpiringDocuments(vehicles);
-    return expiringDocs.filter(doc => {
-      const notificationId = `${doc.vehicleNumber}-${doc.documentType}-${doc.expiryDate}`;
-      return !dismissedNotifications.includes(notificationId);
-    }).length;
-  };
+  if (isLoading) {
+    return <div className="flex items-center justify-center min-h-screen">Loading...</div>;
+  }
 
   if (!user) {
     return <Login onLogin={handleLogin} />;
   }
 
-  const currentNotifications = getExpiringDocuments(vehicles).filter(doc => {
-    const notificationId = `${doc.vehicleNumber}-${doc.documentType}-${doc.expiryDate}`;
-    return !dismissedNotifications.includes(notificationId);
-  });
-
   return (
     <div className={theme === 'dark' ? 'dark' : ''}>
-    <div className="min-h-screen bg-gray-50 flex">
-      <Sidebar
-        activeView={activeView}
-        onViewChange={handleViewChange}
-        onLogout={handleLogout}
-        notificationCount={getNotificationCount()}
-      />
-      
-      <div className="flex-1 overflow-hidden">
-        {activeView === 'dashboard' && (
-          <Dashboard
-            vehicles={vehicles}
-            onEditVehicle={handleEditVehicle}
-            onDeleteVehicle={handleDeleteVehicle}
-          />
-        )}
+      <div className="min-h-screen bg-gray-50 flex">
+        <Sidebar
+          activeView={activeView}
+          onViewChange={handleViewChange}
+          onLogout={handleLogout}
+          notificationCount={notifications.length}
+        />
         
-        {activeView === 'add-vehicle' && (
-          <AddVehicle
-            vehicle={editingVehicle}
-            onSave={handleSaveVehicle}
-            onCancel={() => setActiveView('dashboard')}
-          />
-        )}
+        <div className="flex-1 overflow-hidden">
+          {activeView === 'dashboard' && (
+            <Dashboard
+              vehicles={vehicles}
+              onEditVehicle={handleEditVehicle}
+              onDeleteVehicle={handleDeleteVehicle}
+            />
+          )}
 
-        {activeView === 'vehicles' && (
-          <VehicleList
-            vehicles={vehicles}
-            onEditVehicle={handleEditVehicle}
-            onDeleteVehicle={handleDeleteVehicle}
-            onAddVehicle={() => setActiveView('add-vehicle')}
-          />
-        )}
+          {activeView === 'add-vehicle' && (
+            <AddVehicle
+              vehicle={editingVehicle}
+              onSave={handleSaveVehicle}
+              onCancel={() => setActiveView('dashboard')}
+            />
+          )}
 
-        {activeView === 'documents' && (
-          <Documents vehicles={vehicles} />
-        )}
+          {activeView === 'vehicles' && (
+            <VehicleList
+              vehicles={vehicles}
+              onEditVehicle={handleEditVehicle}
+              onDeleteVehicle={handleDeleteVehicle}
+              onAddVehicle={() => setActiveView('add-vehicle')}
+            />
+          )}
 
-        {activeView === 'notifications' && (
-          <Notifications
-            vehicles={vehicles}
-            onRemindTomorrow={handleRemindTomorrow}
-            onRenewalDone={handleRenewalDone}
-            dismissedNotifications={dismissedNotifications}
-          />
-        )}
+          {activeView === 'documents' && (
+            <Documents vehicles={vehicles} />
+          )}
 
-        {activeView === 'settings' && (
-          <Settings
-            onThemeChange={handleThemeChange}
-            currentTheme={theme}
-          />
-        )}
+          {activeView === 'notifications' && (
+            <Notifications
+              notifications={notifications}
+              onMarkAsRead={handleMarkNotificationAsRead}
+            />
+          )}
+
+          {activeView === 'settings' && (
+             <Settings
+                onThemeChange={handleThemeChange}
+                currentTheme={theme}
+             />
+          )}
+        </div>
       </div>
-
-      <NotificationModal
-        notifications={currentNotifications}
-        isOpen={showNotificationModal}
-        onClose={() => setShowNotificationModal(false)}
-        onRemindTomorrow={handleRemindTomorrow}
-        onRenewalDone={handleRenewalDone}
-      />
-    </div>
     </div>
   );
 }

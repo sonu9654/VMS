@@ -2,27 +2,27 @@ import React, { useState } from 'react';
 import { Car, LogIn } from 'lucide-react';
 
 interface LoginProps {
-  onLogin: (user: { id: string; email: string; name: string }) => void;
+  onLogin: (email, password) => Promise<boolean>;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError('');
     
-    // Simulate login delay
-    setTimeout(() => {
-      onLogin({
-        id: '1',
-        email: email || 'admin@example.com',
-        name: 'Admin User'
-      });
-      setLoading(false);
-    }, 1000);
+    const success = await onLogin(email, password);
+
+    if (!success) {
+      setError('Invalid email or password. Please try again.');
+    }
+
+    setLoading(false);
   };
 
   return (
@@ -44,10 +44,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               </label>
               <input
                 type="email"
+                required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                placeholder="Enter your email (demo@example.com)"
+                placeholder="Enter your email"
               />
             </div>
 
@@ -57,12 +58,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               </label>
               <input
                 type="password"
+                required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all duration-200"
-                placeholder="Enter your password (demo123)"
+                placeholder="Enter your password"
               />
             </div>
+
+            {error && (
+              <p className="text-red-400 text-sm text-center">{error}</p>
+            )}
 
             <button
               type="submit"
@@ -79,12 +85,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               )}
             </button>
           </form>
-
-          <div className="mt-6 text-center">
-            <p className="text-blue-200 text-sm">
-              Demo credentials: any email and password
-            </p>
-          </div>
         </div>
       </div>
     </div>

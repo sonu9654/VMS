@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Vehicle } from '../types';
 import { VehicleCard } from './VehicleCard';
-import { getExpiringDocuments } from '../utils';
+import api from '../api';
 import { Car, FileText, AlertTriangle, TrendingUp, BarChart3, Activity } from 'lucide-react';
 
 interface DashboardProps {
@@ -18,26 +18,25 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [stats, setStats] = useState({
     totalVehicles: 0,
     totalDocuments: 0,
-    expiredDocuments: 0,
-    expiringDocuments: 0
+    expiringSoon: 0,
+    expired: 0
   });
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const expiringDocs = getExpiringDocuments(vehicles);
-    const expiredDocs = expiringDocs.filter(doc => doc.daysUntilExpiry < 0);
-    const soonExpiring = expiringDocs.filter(doc => doc.daysUntilExpiry >= 0 && doc.daysUntilExpiry <= 30);
-    
-    const totalDocs = vehicles.reduce((acc, vehicle) => {
-      return acc + Object.values(vehicle.documents).filter(doc => doc !== null).length;
-    }, 0);
-
-    setStats({
-      totalVehicles: vehicles.length,
-      totalDocuments: totalDocs,
-      expiredDocuments: expiredDocs.length,
-      expiringDocuments: soonExpiring.length
-    });
-  }, [vehicles]);
+    const fetchStats = async () => {
+      setIsLoading(true);
+      try {
+        const { data } = await api.get('/dashboard/stats');
+        setStats(data);
+      } catch (error) {
+        console.error('Failed to fetch dashboard stats', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchStats();
+  }, []);
 
   const statCards = [
     {
@@ -45,32 +44,24 @@ export const Dashboard: React.FC<DashboardProps> = ({
       value: stats.totalVehicles,
       icon: Car,
       color: 'from-blue-500 to-blue-600',
-      bgColor: 'bg-blue-50',
-      textColor: 'text-blue-700'
     },
     {
       title: 'Total Documents',
       value: stats.totalDocuments,
       icon: FileText,
       color: 'from-green-500 to-green-600',
-      bgColor: 'bg-green-50',
-      textColor: 'text-green-700'
     },
     {
       title: 'Expiring Soon',
-      value: stats.expiringDocuments,
+      value: stats.expiringSoon,
       icon: TrendingUp,
       color: 'from-amber-500 to-amber-600',
-      bgColor: 'bg-amber-50',
-      textColor: 'text-amber-700'
     },
     {
       title: 'Expired',
-      value: stats.expiredDocuments,
+      value: stats.expired,
       icon: AlertTriangle,
       color: 'from-red-500 to-red-600',
-      bgColor: 'bg-red-50',
-      textColor: 'text-red-700'
     }
   ];
 
@@ -90,22 +81,31 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
       {/* Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        {statCards.map((stat, index) => {
-          const Icon = stat.icon;
-          return (
-            <div key={index} className={`${stat.bgColor} rounded-xl p-6 border border-gray-100`}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium text-gray-600 mb-1">{stat.title}</p>
-                  <p className={`text-3xl font-bold ${stat.textColor}`}>{stat.value}</p>
-                </div>
-                <div className={`w-12 h-12 bg-gradient-to-r ${stat.color} rounded-lg flex items-center justify-center`}>
-                  <Icon className="w-6 h-6 text-white" />
+        {isLoading ? (
+           Array.from({ length: 4 }).map((_, index) => (
+            <div key={index} className="bg-gray-100 rounded-xl p-6 animate-pulse">
+              <div className="h-6 w-1/2 bg-gray-200 rounded mb-2"></div>
+              <div className="h-10 w-1/4 bg-gray-200 rounded"></div>
+            </div>
+          ))
+        ) : (
+          statCards.map((stat, index) => {
+            const Icon = stat.icon;
+            return (
+              <div key={index} className={`bg-white rounded-xl p-6 border border-gray-100 shadow-sm`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600 mb-1">{stat.title}</p>
+                    <p className={`text-3xl font-bold text-gray-800`}>{stat.value}</p>
+                  </div>
+                  <div className={`w-12 h-12 bg-gradient-to-r ${stat.color} rounded-lg flex items-center justify-center`}>
+                    <Icon className="w-6 h-6 text-white" />
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
 
       {/* Vehicles Grid */}
@@ -125,9 +125,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <Car className="w-16 h-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No vehicles added yet</h3>
             <p className="text-gray-500 mb-4">Start by adding your first vehicle to get started</p>
-            <button className="bg-gradient-to-r from-blue-500 to-purple-600 text-white px-6 py-2 rounded-lg font-medium hover:from-blue-600 hover:to-purple-700 transition-all duration-200">
-              Add Vehicle
-            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

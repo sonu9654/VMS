@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Vehicle, Document } from '../types';
-import { generateId } from '../utils';
 import { Car, Save, X, FileText, Calendar, Hash } from 'lucide-react';
 
 interface AddVehicleProps {
   vehicle?: Vehicle | null;
-  onSave: (vehicle: Vehicle) => void;
+  onSave: (vehicle: Partial<Vehicle>) => void;
   onCancel: () => void;
 }
 
@@ -48,15 +47,10 @@ export const AddVehicle: React.FC<AddVehicleProps> = ({ vehicle, onSave, onCance
   ) => {
     setDocuments(prev => ({
       ...prev,
-      [docType]: prev[docType] 
-        ? { ...prev[docType]!, [field]: value }
-        : {
-            id: generateId(),
-            type: docType,
-            documentNumber: field === 'documentNumber' ? value : '',
-            issueDate: field === 'issueDate' ? value : '',
-            expiryDate: field === 'expiryDate' ? value : '',
-          }
+      [docType]: {
+        ...(prev[docType] || { type: docType }),
+        [field]: value
+      } as Document,
     }));
   };
 
@@ -67,11 +61,14 @@ export const AddVehicle: React.FC<AddVehicleProps> = ({ vehicle, onSave, onCance
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    const vehicleData: Vehicle = {
-      id: vehicle?.id || generateId(),
+    // Filter out any empty/null documents before saving
+    const documentsToSave = Object.fromEntries(
+      Object.entries(documents).filter(([, doc]) => doc && doc.documentNumber)
+    );
+
+    const vehicleData = {
       ...formData,
-      documents,
-      createdAt: vehicle?.createdAt || new Date().toISOString(),
+      documents: documentsToSave,
     };
 
     onSave(vehicleData);
